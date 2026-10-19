@@ -25,7 +25,7 @@ services:
   central:
     build:
       context: .
-      dockerfile: Dockerfile.central
+      dockerfile: WM_Central/Dockerfile.central
     image: wm-central
     container_name: wm-central
     environment:
@@ -43,7 +43,7 @@ services:
   ws1-monitor:
     build:
       context: .
-      dockerfile: Dockerfile.ws
+      dockerfile: WM_WS/Dockerfile.ws
     image: wm-ws
     container_name: wm-ws1-monitor
     command: ["WM_WS/WM_WS_M.py", "7001", "central", "9098", "1", "Parque-Norte"]
@@ -62,7 +62,7 @@ services:
   fo1:
     build:
       context: .
-      dockerfile: Dockerfile.fo
+      dockerfile: WM_FO/Dockerfile.fo
     image: wm-fo
     container_name: wm-fo1
     command: ["broker:29092", "1"]
