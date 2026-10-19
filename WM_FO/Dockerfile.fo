@@ -1,0 +1,9 @@
+FROM python:3.12-slim
+ENV PYTHONUNBUFFERED=1
+WORKDIR /app
+RUN pip install --no-cache-dir confluent-kafka
+COPY protocol.py ./
+COPY WM_FO/ ./WM_FO/
+ENV PORT=8081
+EXPOSE 8081
+ENTRYPOINT ["python", "-u", "WM_FO/WM_FO.py"]
