@@ -1,0 +1,10 @@
+FROM python:3.12-slim
+ENV PYTHONUNBUFFERED=1
+WORKDIR /app
+RUN pip install --no-cache-dir confluent-kafka && mkdir -p /data
+COPY protocol.py ./
+COPY WM_Central/ ./WM_Central/
+ENV CENTRAL_PORT=9098 \
+    DB_PATH=/data/Base_Datos.sqlite
+EXPOSE 9098
+CMD python WM_Central/WM_Central.py ${CENTRAL_PORT} ${KAFKA_BROKER:?define la variable KAFKA_BROKER} ${DB_PATH}
