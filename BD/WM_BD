@@ -1,0 +1,48 @@
+#WM_DB
+import sqlite3
+
+BBDD = "Base_Datos.sqlite"
+
+try:
+    with open(BBDD, 'x'):
+        pass
+except:
+    print(f"{BBDD} ya creada")
+
+with sqlite3.connect(BBDD) as conn:
+
+    print(f"Conectado a {BBDD}")
+
+    cursor = conn.cursor()
+
+    # Estaciones de riego (WS)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS WS (
+            idWS VARCHAR(10) PRIMARY KEY,
+            estado TEXT NOT NULL CHECK (estado IN ('DISPONIBLE','REGANDO','FUGA','FUERA_DE_SERVICIO','DESCONECTADA')),
+            ubicacion VARCHAR(100) NOT NULL
+        );
+    """)
+
+    # Operarios de campo (FO)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS OPERARIO (
+            idOperario VARCHAR(20) PRIMARY KEY
+        )
+    """)
+
+    # Histórico de riegos finalizados
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS RIEGO (
+            idRiego INTEGER PRIMARY KEY AUTOINCREMENT,
+            operario VARCHAR(20) NOT NULL,
+            ws VARCHAR(10) NOT NULL,
+            estado TEXT NOT NULL CHECK (estado IN ('COMPLETADO','INTERRUMPIDO')),
+            motivo TEXT,
+            volumen DECIMAL(10,2) NOT NULL,
+            duracion DECIMAL(10,1) NOT NULL,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (operario) REFERENCES OPERARIO(idOperario),
+            FOREIGN KEY (ws) REFERENCES WS(idWS)
+        )
+    """)

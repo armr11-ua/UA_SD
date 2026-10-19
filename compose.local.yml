@@ -1,0 +1,75 @@
+services:
+  broker:
+    image: apache/kafka:latest
+    hostname: broker
+    container_name: broker
+    ports:
+      - 9092:9092
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_NODE_ID: 1
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@broker:29093
+      KAFKA_LISTENERS: PLAINTEXT://broker:29092,CONTROLLER://broker:29093,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+      CLUSTER_ID: "gTBb85_WRXu6oQgq-brTQw"
+
+  central:
+    build:
+      context: .
+      dockerfile: Dockerfile.central
+    image: wm-central
+    container_name: wm-central
+    environment:
+      KAFKA_BROKER: broker:29092
+      CENTRAL_PORT: 9098
+      PORT: 8080
+    ports:
+      - 9098:9098
+      - 8080:8080
+    volumes:
+      - central_data:/data
+    depends_on:
+      - broker
+
+  ws1-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile.ws
+    image: wm-ws
+    container_name: wm-ws1-monitor
+    command: ["WM_WS/WM_WS_M.py", "7001", "central", "9098", "1", "Parque-Norte"]
+    depends_on:
+      - central
+
+  ws1-engine:
+    image: wm-ws
+    container_name: wm-ws1-engine
+    command: ["WM_WS/WM_WS_E.py", "broker:29092", "ws1-monitor:7001"]
+    stdin_open: true
+    tty: true
+    depends_on:
+      - ws1-monitor
+
+  fo1:
+    build:
+      context: .
+      dockerfile: Dockerfile.fo
+    image: wm-fo
+    container_name: wm-fo1
+    command: ["broker:29092", "1"]
+    ports:
+      - 8081:8081
+    depends_on:
+      - central
+
+volumes:
+  central_data:

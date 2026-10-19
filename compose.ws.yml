@@ -1,0 +1,37 @@
+services:
+  ws1-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile.ws
+    image: wm-ws
+    container_name: wm-ws1-monitor
+    command: ["WM_WS/WM_WS_M.py", "7001", "${CENTRAL_HOST:?define CENTRAL_HOST en .env}", "${CENTRAL_PORT:?define CENTRAL_PORT en .env}", "1", "Parque-Norte"]
+    restart: unless-stopped
+
+  ws1-engine:
+    image: wm-ws
+    container_name: wm-ws1-engine
+    command: ["WM_WS/WM_WS_E.py", "${KAFKA_BROKER:?define KAFKA_BROKER en .env}", "ws1-monitor:7001"]
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+    depends_on:
+      - ws1-monitor
+
+  ws2-monitor:
+    image: wm-ws
+    container_name: wm-ws2-monitor
+    command: ["WM_WS/WM_WS_M.py", "7002", "${CENTRAL_HOST:?define CENTRAL_HOST en .env}", "${CENTRAL_PORT:?define CENTRAL_PORT en .env}", "2", "Parque-Sur"]
+    restart: unless-stopped
+    depends_on:
+      - ws1-monitor
+
+  ws2-engine:
+    image: wm-ws
+    container_name: wm-ws2-engine
+    command: ["WM_WS/WM_WS_E.py", "${KAFKA_BROKER:?define KAFKA_BROKER en .env}", "ws2-monitor:7002"]
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+    depends_on:
+      - ws2-monitor

@@ -1,0 +1,21 @@
+services:
+  fo1:
+    build:
+      context: .
+      dockerfile: Dockerfile.fo
+    image: wm-fo
+    container_name: wm-fo1
+    command: ["${KAFKA_BROKER:?define KAFKA_BROKER en .env}", "1"]
+    ports:
+      - 8081:8081
+    restart: unless-stopped
+
+  fo2:
+    image: wm-fo
+    container_name: wm-fo2
+    command: ["${KAFKA_BROKER:?define KAFKA_BROKER en .env}", "2"]
+    ports:
+      - 8082:8081
+    restart: unless-stopped
+    depends_on:
+      - fo1

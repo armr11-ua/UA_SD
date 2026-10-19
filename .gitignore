@@ -217,4 +217,12 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
+#servicios
+servicios1.json
+servicios2.json
+
+#BD
+Base_Datos.sqlite
+
+.vscode/
 
