@@ -1,3 +1,5 @@
+# Prueba en local: broker + central + 1 WS + 1 FO, todo en una maquina.
+#   docker compose -f compose.local.yml up --build
 services:
   broker:
     image: apache/kafka:latest
@@ -32,6 +34,7 @@ services:
       KAFKA_BROKER: broker:29092
       CENTRAL_PORT: 9098
       PORT: 8080
+      # AUTO_ALTA: 0   # 0 = solo acepta WS ya registradas en la BD
     ports:
       - 9098:9098
       - 8080:8080
@@ -39,6 +42,7 @@ services:
       - central_data:/data
     depends_on:
       - broker
+    restart: unless-stopped
 
   ws1-monitor:
     build:
@@ -47,8 +51,11 @@ services:
     image: wm-ws
     container_name: wm-ws1-monitor
     command: ["WM_WS/WM_WS_M.py", "7001", "central", "9098", "1", "Parque-Norte"]
+    environment:
+      PAIS: ES
     depends_on:
       - central
+    restart: unless-stopped
 
   ws1-engine:
     image: wm-ws
@@ -56,8 +63,11 @@ services:
     command: ["WM_WS/WM_WS_E.py", "broker:29092", "ws1-monitor:7001"]
     stdin_open: true
     tty: true
+    volumes:
+      - ws1_state:/state
     depends_on:
       - ws1-monitor
+    restart: unless-stopped
 
   fo1:
     build:
@@ -65,11 +75,17 @@ services:
       dockerfile: WM_FO/Dockerfile.fo
     image: wm-fo
     container_name: wm-fo1
-    command: ["broker:29092", "1"]
+    command: ["broker:29092", "1", "servicios1.json"]
+    environment:
+      PAIS: ES
     ports:
       - 8081:8081
+    volumes:
+      - ./servicios1.json:/app/servicios1.json:ro
     depends_on:
       - central
+    restart: unless-stopped
 
 volumes:
   central_data:
+  ws1_state:

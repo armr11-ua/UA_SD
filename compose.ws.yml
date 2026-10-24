@@ -1,11 +1,16 @@
+# PC LAB 2: varias WS (Monitor + Engine). Variables en .env (ver .env.example).
+#   docker compose -f compose.ws.yml up --build
+# Para el Engine interactivo (fuga / riego manual):  docker attach wm-ws1-engine
 services:
   ws1-monitor:
     build:
       context: .
-      dockerfile: Dockerfile.ws
+      dockerfile: WM_WS/Dockerfile.ws
     image: wm-ws
     container_name: wm-ws1-monitor
     command: ["WM_WS/WM_WS_M.py", "7001", "${CENTRAL_HOST:?define CENTRAL_HOST en .env}", "${CENTRAL_PORT:?define CENTRAL_PORT en .env}", "1", "Parque-Norte"]
+    environment:
+      PAIS: ${PAIS_WS1:-ES}      # el Engine lo recibe del Monitor y usa la misma particion
     restart: unless-stopped
 
   ws1-engine:
@@ -14,6 +19,8 @@ services:
     command: ["WM_WS/WM_WS_E.py", "${KAFKA_BROKER:?define KAFKA_BROKER en .env}", "ws1-monitor:7001"]
     stdin_open: true
     tty: true
+    volumes:
+      - ws1_state:/state
     restart: unless-stopped
     depends_on:
       - ws1-monitor
@@ -22,9 +29,9 @@ services:
     image: wm-ws
     container_name: wm-ws2-monitor
     command: ["WM_WS/WM_WS_M.py", "7002", "${CENTRAL_HOST:?define CENTRAL_HOST en .env}", "${CENTRAL_PORT:?define CENTRAL_PORT en .env}", "2", "Parque-Sur"]
+    environment:
+      PAIS: ${PAIS_WS2:-ES}
     restart: unless-stopped
-    depends_on:
-      - ws1-monitor
 
   ws2-engine:
     image: wm-ws
@@ -32,6 +39,12 @@ services:
     command: ["WM_WS/WM_WS_E.py", "${KAFKA_BROKER:?define KAFKA_BROKER en .env}", "ws2-monitor:7002"]
     stdin_open: true
     tty: true
+    volumes:
+      - ws2_state:/state
     restart: unless-stopped
     depends_on:
       - ws2-monitor
+
+volumes:
+  ws1_state:
+  ws2_state:

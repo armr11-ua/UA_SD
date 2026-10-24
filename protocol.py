@@ -1,181 +1,157 @@
-"""protocol: topics de Kafka, estados, protocolo de sockets <STX><DATA><ETX><LRC>
-y utilidades de Kafka"""
-import json
-import uuid
+"""protocolos - Protocolo de SOCKETS <STX><DATA><ETX><LRC>.
 
-# ------------------------- Topics de Kafka -------------------------
-# Central -> WS
-WS_CONTROL = "WS_CONTROL"                    # START / BLOCK / ACTIVATE
-# WS -> Central
-WS_ACK = "WS_ACK"                            # respuesta de la WS a un START
-WS_STATUS = "WS_STATUS"                      # estado de la WS (cambios + keep-alive)
-WS_SUPPLY_COMPLETE = "WS_SUPPLY_COMPLETE"    # ticket de riego finalizado
-# WS -> Central y FO
-WS_CONSUMPTION = "WS_CONSUMPTION"            # caudal / volumen cada segundo
-# FO (o WS manual) -> Central
-FO_REQUEST = "FO_REQUEST"                    # peticion de riego {idOperator, idWS}
-# Central -> FO
-FO_NOTIFY = "FO_NOTIFY"                      # pasos del proceso de autorizacion
-FO_AUTH = "FO_AUTH"                          # autorizacion YES/NO
-FO_TICKET = "FO_TICKET"                      # resumen final del riego
-WS_LIST = "WS_LIST"                          # WS disponibles
+Lo usan solo los modulos que hablan por sockets:
+  Monitor <-> Central   (registro/autenticacion, latido, fugas)
+  Monitor <-> Engine    (ID de la WS y comprobacion de salud cada segundo)
 
-# ------------------------- Estados de una WS ------------------------- no tengo q estar cambiandolo en todos lados
-DISPONIBLE = "DISPONIBLE"
-REGANDO = "REGANDO"
-FUGA = "FUGA"
-FUERA_DE_SERVICIO = "FUERA_DE_SERVICIO"
-DESCONECTADA = "DESCONECTADA"
+No depende de Kafka: los topics y el resto de utilidades de Kafka estan en topics.py.
 
-# ------------------------- Protocolo de sockets -------------------------
-STX, ETX, ENQ, ACK, NACK, EOT = b"\x02", b"\x03", b"\x05", b"\x06", b"\x15", b"\x04"
+Flujo de una conversacion (cliente -> servidor):
+  <ENQ>                          el cliente abre la comunicacion
+  <ACK>                          el servidor la acepta
+  <STX>PETICION<ETX><LRC>        peticion
+  <ACK>                          el servidor confirma que llego bien (o <NACK> si llego mal)
+  <STX>RESPUESTA<ETX><LRC>       respuesta
+  <ACK>                          el cliente confirma que llego bien (o <NACK> si llego mal)
+  <EOT>                          cierre ordenado
+"""
 
-#comienzo, final, inicia la comunicación, confirma, indica que el msj llegó mal, final de comunicación
+# ------------------------- Caracteres de control -------------------------
+STX = b"\x02"    # comienzo del mensaje
+ETX = b"\x03"    # final del mensaje
+ENQ = b"\x05"    # inicia la comunicacion
+ACK = b"\x06"    # confirma
+NACK = b"\x15"   # el mensaje llego mal
+EOT = b"\x04"    # final de la comunicacion
+
+SEPARADOR_CAMPOS = "#"   # CODIGO#campo1#campo2...
+SEP = SEPARADOR_CAMPOS   # alias corto, de uso frecuente
+
+REINTENTOS_POR_DEFECTO = 3
+
+# ------------------------- Mensajes Monitor -> Central -------------------------
+REGISTER = "REGISTER"        # REGISTER#idWS#ubicacion#pais
+HB = "HB"                    # HB#idWS            (latido)
+LEAK = "LEAK"                # LEAK#idWS          (averia / fuga)
+RECOVERED = "RECOVERED"      # RECOVERED#idWS     (averia resuelta)
+
+# ------------------------- Respuestas de Central -------------------------
+REGISTER_OK = "REGISTER_OK"
+REGISTER_KO = "REGISTER_KO"  # REGISTER_KO#motivo (ID_INVALIDO, PAIS_INVALIDO, PAIS_DISTINTO,
+                             #                     YA_CONECTADA, NO_REGISTRADA)
+OK = "OK"
+KO = "KO"                    # KO#motivo
+
+# ------------------------- Monitor <-> Engine -------------------------
+ID = "ID"                    # Monitor -> Engine: ID#idWS#pais (tras autenticarse en Central)
+HEALTH = "HEALTH"            # Monitor -> Engine: HEALTH#CENTRAL_OK | HEALTH#CENTRAL_KO
+CENTRAL_OK = "CENTRAL_OK"    #   (el Monitor le cuenta al Engine si Central esta alcanzable)
+CENTRAL_KO = "CENTRAL_KO"    # Engine -> Monitor: OK | KO
 
 
-#byte de comprobacion de msj
-def lrc(data: bytes) -> int:
-    """XOR byte a byte del mensaje."""
-    r = 0
-    for b in data:
-        r ^= b
-    return r
-
-#construye la trama que envuelve al msj
-def build_frame(msg: str) -> bytes:
-    data = msg.encode("utf-8")
-    return STX + data + ETX + bytes([lrc(data)])
+def mensaje(*campos) -> str:
+    """mensaje(REGISTER, 1, 'Parque') -> 'REGISTER#1#Parque'."""
+    return SEPARADOR_CAMPOS.join(str(campo) for campo in campos)
 
 
-def _recv1(sock) -> bytes:
-    b = sock.recv(1)
-    if not b:
+# ------------------------- Trama -------------------------
+def lrc(datos: bytes) -> int:
+    """Byte de comprobacion: XOR byte a byte del mensaje."""
+    resultado = 0
+    for byte in datos:
+        resultado ^= byte
+    return resultado
+
+
+def build_frame(texto: str) -> bytes:
+    """Envuelve el mensaje: <STX><texto><ETX><LRC>."""
+    datos = texto.encode("utf-8")
+    return STX + datos + ETX + bytes([lrc(datos)])
+
+
+def _recibir_un_byte(sock) -> bytes:
+    byte = sock.recv(1)
+    if not byte:
         raise ConnectionError("conexion cerrada")
-    return b
+    return byte
 
-#inicio de conexión
+
+def _leer_hasta_etx(sock) -> bytes:
+    """Lee los bytes del mensaje hasta encontrar <ETX> (que no se incluye)."""
+    datos = bytearray()
+    while True:
+        byte = _recibir_un_byte(sock)
+        if byte == ETX:
+            return bytes(datos)
+        datos += byte
+
+
+# ------------------------- Conexion -------------------------
 def handshake(sock):
-    """Cliente: <ENQ> -> espera <ACK>."""
+    """Cliente: envia <ENQ> y espera <ACK>."""
     sock.sendall(ENQ)
-    if _recv1(sock) != ACK:
+    if _recibir_un_byte(sock) != ACK:
         raise ConnectionError("handshake rechazado")
 
-#aceptar conexión
+
 def accept_handshake(sock):
-    """Servidor: espera <ENQ> -> responde <ACK>"""
-    if _recv1(sock) != ENQ:
+    """Servidor: espera <ENQ> y responde <ACK>."""
+    if _recibir_un_byte(sock) != ENQ:
         raise ConnectionError("se esperaba ENQ")
     sock.sendall(ACK)
 
 
-def send_message(sock, msg: str, retries: int = 3):
-    """Envia <STX><msg><ETX><LRC> y espera <ACK>. Reintenta si recibe <NACK>."""
-    frame = build_frame(msg)
-    for _ in range(retries):
-        sock.sendall(frame)
-        if _recv1(sock) == ACK:
+def end_session(sock):
+    """Cierre ordenado: envia <EOT> (si la conexion ya esta rota, no pasa nada)."""
+    try:
+        sock.sendall(EOT)
+    except OSError:
+        pass
+
+
+# ------------------------- Mensajes -------------------------
+def send_message(sock, texto: str, reintentos: int = REINTENTOS_POR_DEFECTO):
+    """Envia <STX><texto><ETX><LRC> y espera <ACK>. Reintenta si recibe <NACK>."""
+    trama = build_frame(texto)
+    for _ in range(reintentos):
+        sock.sendall(trama)
+        if _recibir_un_byte(sock) == ACK:
             return
     raise ConnectionError("mensaje no confirmado (NACK)")
 
 
 def receive_message(sock) -> str:
-    """Lee una trama, valida el LRC y responde <ACK>/<NACK>.
+    """Lee una trama, valida el LRC y responde <ACK> (o <NACK> si el LRC no cuadra).
+
     Lanza OSError (ConnectionError / timeout) si se cierra o expira la conexion."""
     while True:
-        b = _recv1(sock)
-        if b == ENQ:
+        byte = _recibir_un_byte(sock)
+
+        if byte == ENQ:                      # el otro extremo abre una comunicacion
             sock.sendall(ACK)
             continue
-        if b == EOT:
+        if byte == EOT:                      # el otro extremo cierra
             raise ConnectionError("EOT recibido")
-        if b != STX:
+        if byte != STX:                      # cualquier otro byte suelto se ignora
             continue
-        data = bytearray()
-        while True:
-            c = _recv1(sock)
-            if c == ETX:
-                break
-            data += c
-        recibido = _recv1(sock)[0]
-        if recibido != lrc(bytes(data)):
-            sock.sendall(NACK)
+
+        datos = _leer_hasta_etx(sock)
+        lrc_recibido = _recibir_un_byte(sock)[0]
+        if lrc_recibido != lrc(datos):
+            sock.sendall(NACK)               # llego mal: el emisor reintentara
             continue
-        sock.sendall(ACK)
-        return data.decode("utf-8")
 
-
-def request(sock, msg: str) -> str:
-    """Cliente: envia una peticion y devuelve la respuesta."""
-    send_message(sock, msg)
-    return receive_message(sock)
-
-
-# ------------------------- Utilidades Kafka -------------------------
-ALL_TOPICS = [WS_CONTROL, WS_ACK, WS_STATUS, WS_SUPPLY_COMPLETE, WS_CONSUMPTION,
-              FO_REQUEST, FO_NOTIFY, FO_AUTH, FO_TICKET, WS_LIST]
-
-
-def ensure_topics(broker, topics=None):
-    """Crea los topics si no existen. Lanza excepcion si el broker no esta disponible."""
-    from confluent_kafka.admin import AdminClient, NewTopic
-    topics = topics or ALL_TOPICS
-    admin = AdminClient({"bootstrap.servers": broker})
-    existing = set(admin.list_topics(timeout=5).topics)      # falla si no hay broker
-    nuevos = [NewTopic(t, num_partitions=1, replication_factor=1) for t in topics if t not in existing]
-    if nuevos:
-        for t, fut in admin.create_topics(nuevos).items():
-            try:
-                fut.result()
-            except Exception as e:
-                if "ALREADY_EXISTS" not in str(e):
-                    raise
-
-
-class JsonProducer:
-    """Envoltorio de confluent_kafka.Producer: send(topic, dict) y flush()."""
-
-    def __init__(self, broker):
-        from confluent_kafka import Producer
-        self.p = Producer({"bootstrap.servers": broker})
-
-    @staticmethod
-    def _cb(err, msg):
-        if err is not None:
-            print(f"[KAFKA] Error entregando mensaje a {msg.topic()}: {err}", flush=True)
-
-    def send(self, topic, data):
-        raw = json.dumps(data).encode("utf-8")
         try:
-            self.p.produce(topic, raw, on_delivery=self._cb)
-        except BufferError:
-            self.p.poll(0.5)
-            self.p.produce(topic, raw, on_delivery=self._cb)
-        self.p.poll(0)
+            texto = datos.decode("utf-8")
+        except UnicodeDecodeError:
+            sock.sendall(NACK)               # no es texto valido: se trata como trama danada
+            continue
 
-    def flush(self):
-        self.p.flush(5)
-
-
-def make_consumer(broker, topics, group_prefix, ready=None):
-    """Consumer que lee solo mensajes nuevos (group.id unico por ejecucion, sin reprocesar
-    ordenes antiguas). 'ready' se activa cuando Kafka le asigna las particiones."""
-    from confluent_kafka import Consumer
-    c = Consumer({"bootstrap.servers": broker,
-                  "group.id": f"{group_prefix}_{uuid.uuid4().hex[:8]}",
-                  "auto.offset.reset": "latest",
-                  "enable.auto.commit": False})
-
-    def on_assign(consumer, partitions):
-        if ready is not None:
-            ready.set()
-
-    c.subscribe(topics, on_assign=on_assign)
-    return c
+        sock.sendall(ACK)
+        return texto
 
 
-def kafka_loads(msg):
-    """Mensaje de Kafka -> dict (o None si no es JSON valido)."""
-    try:
-        return json.loads(msg.value().decode("utf-8"))
-    except Exception:
-        return None
+def request(sock, texto: str) -> str:
+    """Cliente: envia una peticion y devuelve la respuesta."""
+    send_message(sock, texto)
+    return receive_message(sock)

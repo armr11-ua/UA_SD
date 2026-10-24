@@ -2,7 +2,8 @@ FROM python:3.12-slim
 ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 RUN pip install --no-cache-dir confluent-kafka
-COPY protocol.py ./
+# El FO solo habla Kafka: no necesita protocolos.py
+COPY topics.py ./
 COPY WM_FO/ ./WM_FO/
 ENV PORT=8081
 EXPOSE 8081

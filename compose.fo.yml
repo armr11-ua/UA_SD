@@ -1,21 +1,30 @@
+# PC LAB 1: varios Field Operators. Variables en .env (ver .env.example).
+#   docker compose -f compose.fo.yml up --build
+# Cada FO lanza solo su fichero de servicios (sin interaccion) y tiene su panel web.
 services:
   fo1:
     build:
       context: .
-      dockerfile: Dockerfile.fo
+      dockerfile: WM_FO/Dockerfile.fo
     image: wm-fo
     container_name: wm-fo1
-    command: ["${KAFKA_BROKER:?define KAFKA_BROKER en .env}", "1"]
+    command: ["${KAFKA_BROKER:?define KAFKA_BROKER en .env}", "1", "servicios1.json"]
+    environment:
+      PAIS: ${PAIS_FO1:-ES}      # pais del operario = particion de Kafka que usa
     ports:
       - 8081:8081
+    volumes:
+      - ./servicios1.json:/app/servicios1.json:ro
     restart: unless-stopped
 
   fo2:
     image: wm-fo
     container_name: wm-fo2
-    command: ["${KAFKA_BROKER:?define KAFKA_BROKER en .env}", "2"]
+    command: ["${KAFKA_BROKER:?define KAFKA_BROKER en .env}", "2", "servicios2.json"]
+    environment:
+      PAIS: ${PAIS_FO2:-ES}
     ports:
       - 8082:8081
+    volumes:
+      - ./servicios2.json:/app/servicios2.json:ro
     restart: unless-stopped
-    depends_on:
-      - fo1

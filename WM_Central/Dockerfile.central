@@ -2,7 +2,9 @@ FROM python:3.12-slim
 ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 RUN pip install --no-cache-dir confluent-kafka && mkdir -p /data
-COPY protocol.py ./
+# Central usa sockets (protocolos.py) y Kafka (topics.py)
+COPY protocol.py topics.py ./
+COPY BD/ ./BD/
 COPY WM_Central/ ./WM_Central/
 ENV CENTRAL_PORT=9098 \
     DB_PATH=/data/Base_Datos.sqlite
